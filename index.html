@@ -747,9 +747,10 @@ tbody tr:hover td{background:rgba(108,99,255,.04);}
 
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <button class="btn btn-primary" onclick="ficSync()">🔄 Sincronizza Ora</button>
-            <button class="btn btn-ghost" onclick="ficSyncClienti()">👥 Sync solo Clienti</button>
-            <button class="btn btn-ghost" onclick="ficSyncFatture()">🧾 Sync solo Fatture</button>
-            <button class="btn btn-outline" onclick="ficDisconnect()" style="margin-left:auto;color:var(--danger);border-color:rgba(255,107,107,.3)">✕ Disconnetti</button>
+            <button class="btn btn-ghost" onclick="ficSyncClienti()">👥 Sync Clienti</button>
+            <button class="btn btn-ghost" onclick="ficSyncFatture()">🧾 Sync Fatture</button>
+            <button class="btn btn-ghost" onclick="ficDebugToken()" style="color:var(--warning)">🔍 Debug Token</button>
+            <button class="btn btn-outline" onclick="ficDisconnect()"ton class="btn btn-outline" onclick="ficDisconnect()" style="margin-left:auto;color:var(--danger);border-color:rgba(255,107,107,.3)">✕ Disconnetti</button>
           </div>
 
           <!-- Log attività -->
@@ -1564,7 +1565,19 @@ const FIC = {
       ? `${this.PROXY}?action=${action}`
       : `${this.PROXY}/${action}`;
     const res = await fetch(url, { headers: this.proxyHeaders() });
-    if (!res.ok) throw new Error(`Proxy Error ${res.status}`);
+    if (!res.ok) {
+      let errBody = {};
+      try { errBody = await res.json(); } catch(e) {}
+      const msg = errBody.hint || errBody.error || `Proxy Error ${res.status}`;
+      const detail = errBody.fic_detail ? JSON.stringify(errBody.fic_detail).substring(0, 200) : '';
+      throw new Error(detail ? `${msg} | ${detail}` : msg);
+    }
+    return res.json();
+  },
+
+  async debugToken() {
+    const url = IS_CLOUD ? `${this.PROXY}?action=debug` : `${this.PROXY}/debug`;
+    const res = await fetch(url, { headers: this.proxyHeaders() });
     return res.json();
   },
 
@@ -1708,7 +1721,44 @@ async function ficConnect() {
     document.getElementById('fic-connect-btn').disabled = false;
   }
 }
+async function ficDebugToken() {
+  ficLog('🔍 Avvio debug token — testo tutti i permessi...', 'info');
+  document.getElementById('fic-loading').style.display = 'block';
+  try {
+    const data = await FIC.debugToken();
+    ficLog('─── RISULTATO DEBUG ───', 'info');
+    if (data.user_info) {
+      ficLog(`user/info → HTTP ${data.user_info.status}`, data.user_info.status === 200 ? 'ok' : 'err');
+    }
+    if (data.companies) {
+      ficLog(`user/companies → HTTP ${data.companies.status}`, data.companies.status === 200 ? 'ok' : 'err');
+      if (data.companies.status === 200 && data.companies.data?.data) {
+        data.companies.data.data.forEach(c => {
+          ficLog(`  Azienda: ${c.company?.name || '?'} — ID: ${c.company?.id || c.id}`, 'ok');
+        });
+      }
+    }
+    if (data['clients_entities']) {
+      const s = data['clients_entities'].status;
+      ficLog(`clienti → HTTP ${s}`, s === 200 ? 'ok' : 'err');
+      if (s >= 400) ficLog('  ⚠️ Token senza permesso entity.clients:r', 'err');
+      else ficLog(`  ✅ Clienti OK — ${data['clients_entities'].data?.data?.length || 0} trovati`, 'ok');
+    }
+    if (data['invoices']) {
+      const s = data['invoices'].status;
+      ficLog(`fatture → HTTP ${s}`, s === 200 ? 'ok' : 'err');
+      if (s >= 400) ficLog('  ⚠️ Token senza permesso issued_documents:r', 'err');
+      else ficLog(`  ✅ Fatture OK — ${data['invoices'].data?.data?.length || 0} trovate`, 'ok');
+    }
+    ficLog('─── FINE DEBUG ───', 'info');
+  } catch(err) {
+    ficLog('Errore debug: ' + err.message, 'err');
+  }
+  document.getElementById('fic-loading').style.display = 'none';
+}
 
+// ── SYNC COMPLETO ──
+async function ficSync() {
 // ── SYNC COMPLETO ──
 async function ficSync() {
   ficLog('Avvio sincronizzazione completa...');
